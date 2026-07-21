@@ -144,21 +144,14 @@
     user-select:none;
   }
   .btn-toggle input{accent-color:var(--teal); width:15px; height:15px;}
+  .btn-toggle:has(input:disabled){opacity:.4; cursor:not-allowed;}
+  .btn-toggle input:disabled{cursor:not-allowed;}
   .svc-select{max-width:280px; height:38px;}
   .btn-toggle.active{
     background:var(--gold-soft);
     border-color:var(--gold);
     color:#5b3d0f;
   }
-  #refreshBtn{
-    height:100%;
-    color:var(--ink);
-    font-weight:600;
-  }
-  #refreshBtn:hover{background:var(--gold-soft); border-color:var(--gold);}
-  #refreshBtn:disabled{opacity:.6; cursor:default;}
-  #refreshBtn.spinning #refreshIcon{animation:spin .8s linear infinite;}
-  @keyframes spin{ to{ transform:rotate(360deg); } }
   .sync-row{
     font-family:var(--font-mono);
     font-size:11px;
@@ -523,14 +516,6 @@
       </div>
       <select id="catFilter"><option value="">All categories</option></select>
       <select id="storeFilter"><option value="">All stores</option></select>
-      <label class="btn-toggle" id="stockToggleWrap">
-        <input type="checkbox" id="stockToggle" checked>
-        In stock only
-      </label>
-      <button class="btn-toggle" id="refreshBtn" type="button" title="Pull the latest data from Google Sheets">
-        <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-        Refresh
-      </button>
     </div>
     <div class="sync-row" id="syncRow"></div>
     </div>
@@ -590,6 +575,42 @@
           <input type="checkbox" id="avrToggle">
           Include AVR/UPS
         </label>
+      </div>
+      <div class="wiz-row" id="wizServicesRow">
+        <span class="wiz-label">Services</span>
+        <label class="btn-toggle" id="wizSvcAssemblyWrap">
+          <input type="checkbox" id="wizSvcAssemblyToggle">
+          PC Assembly Fee
+        </label>
+        <label class="btn-toggle" id="wizSvcCleaningWrap">
+          <input type="checkbox" id="wizSvcCleaningToggle">
+          PC Cleaning Fee
+        </label>
+        <label class="btn-toggle" id="wizSvcRecaseWrap">
+          <input type="checkbox" id="wizSvcRecaseToggle">
+          PC Recase Fee
+        </label>
+        <label class="btn-toggle" id="wizSvcDiagnosisWrap">
+          <input type="checkbox" id="wizSvcDiagnosisToggle">
+          PC Diagnosis Fee
+        </label>
+        <label class="btn-toggle" id="wizSvcUpgradeWrap">
+          <input type="checkbox" id="wizSvcUpgradeToggle">
+          PC Installation Upgrade Fee
+        </label>
+        <label class="btn-toggle" id="wizSvcReformatWrap">
+          <input type="checkbox" id="wizSvcReformatToggle">
+          PC Reformat Fee
+        </label>
+      </div>
+      <div class="wiz-row" id="wizServiceTypeRow">
+        <span class="wiz-label">Service Type</span>
+        <select id="wizSvcAssemblySelect" class="svc-select" style="display:none;"></select>
+        <select id="wizSvcCleaningSelect" class="svc-select" style="display:none;"></select>
+        <select id="wizSvcRecaseSelect" class="svc-select" style="display:none;"></select>
+        <select id="wizSvcDiagnosisSelect" class="svc-select" style="display:none;"></select>
+        <select id="wizSvcUpgradeSelect" class="svc-select" style="display:none;"></select>
+        <select id="wizSvcReformatSelect" class="svc-select" style="display:none;"></select>
       </div>
       <div class="wiz-row">
         <button class="generate-btn" id="generateBtn" type="button">Generate Build</button>
@@ -1022,16 +1043,11 @@ function normalize(s){ return (s||'').toLowerCase(); }
 function getFiltered(){
   const q = normalize(document.getElementById('q').value.trim());
   const cat = document.getElementById('catFilter').value;
-  const stockOnly = document.getElementById('stockToggle').checked;
   const terms = q.split(/\s+/).filter(Boolean);
 
   let list = ITEMS.filter(it=>{
     if(cat && it.cat!==cat) return false;
     if(storeFilterIdx>=0 && it.q[storeFilterIdx]<=0) return false;
-    if(stockOnly){
-      if(storeFilterIdx>=0){ if(it.q[storeFilterIdx]<=0) return false; }
-      else if(it.t<=0) return false;
-    }
     if(terms.length){
       const hay = normalize(it.sku+' '+it.desc+' '+it.cat);
       for(const t of terms){ if(!hay.includes(t)) return false; }
@@ -1116,7 +1132,6 @@ function render(){
 
 document.getElementById('q').addEventListener('input', render);
 catSel.addEventListener('change', render);
-document.getElementById('stockToggle').addEventListener('change', render);
 storeSel.addEventListener('change', (e)=>{
   storeFilterIdx = e.target.value===''? -1 : parseInt(e.target.value);
   buildHead();
@@ -1201,6 +1216,8 @@ wireChipGroup('buildTypeGroup','buildType', (v)=>{
   document.getElementById('addonsRow').style.display = v==='desktop' ? '' : 'none';
   document.getElementById('gpuToggleWrap').style.display = v==='desktop' ? '' : 'none';
   document.getElementById('monitorToggleWrap').style.display = v==='desktop' ? '' : 'none';
+  document.getElementById('wizServicesRow').style.display = v==='desktop' ? '' : 'none';
+  document.getElementById('wizServiceTypeRow').style.display = v==='desktop' ? '' : 'none';
 });
 wireChipGroup('useCaseGroup','useCase');
 wireChipGroup('budgetPresetGroup','budget');
@@ -1392,9 +1409,14 @@ function generateBuild(){
     picks.push({slot, pool, chosen: item, idx: item?pool.indexOf(item):-1});
   });
 
+  // 8. Services (PC Assembly, Cleaning, Recase, Diagnosis, Upgrade, Reformat)
+  buildServicePicks(wizServiceState).forEach(sp=>{
+    picks.push({slot:{label:'SERVICE', key:'svc'}, pool: sp.pool, chosen: sp.chosen, idx: sp.idx, isService:true});
+  });
+
   // reorder for display
   const order = ['cpu','mobo','ram','gpu','stor','psu','case','cool','mon','kb','mouse','hset','avr'];
-  picks.sort((a,b)=> order.indexOf(a.slot.key) - order.indexOf(b.slot.key));
+  picks.sort((a,b)=> (a.isService?999:order.indexOf(a.slot.key)) - (b.isService?999:order.indexOf(b.slot.key)));
 
   const total = picks.reduce((s,p)=>s+(p.chosen?p.chosen.srp:0),0);
   const compat = {socket: cpuSocket, ram: moboRam, watts: requiredWatts};
@@ -1494,11 +1516,14 @@ function renderBuildResults(picks, total, compat, notes){
       return;
     }
     const it = p.chosen;
-    const stockTxt = wizState.storeIdx>=0 ? (it.q[wizState.storeIdx]+' at '+STORE_SHORT[wizState.storeIdx]) : (it.t+' total across stores');
+    const isService = p.isService;
+    const stockTxt = isService ? '' : (wizState.storeIdx>=0 ? (it.q[wizState.storeIdx]+' at '+STORE_SHORT[wizState.storeIdx]) : (it.t+' total across stores'));
+    const skuLine = 'SKU '+escapeHtml(it.sku)+(stockTxt ? ' · '+escapeHtml(stockTxt) : '');
+    const catLabel = isService ? 'SERVICE' : escapeHtml(p.slot.label);
     const metaTxt = p.meta ? ' · '+escapeHtml(p.meta) : '';
     html += '<tr data-row="'+rowIdx+'">';
-    html += '<td class="slot-name">'+escapeHtml(p.slot.label)+metaTxt+'</td>';
-    html += '<td><div style="font-weight:700;">'+escapeHtml(it.desc)+'</div><div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);">SKU '+escapeHtml(it.sku)+' · '+escapeHtml(stockTxt)+'</div></td>';
+    html += '<td class="slot-name">'+catLabel+metaTxt+'</td>';
+    html += '<td><div style="font-weight:700;">'+escapeHtml(it.desc)+'</div><div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);">'+skuLine+'</div></td>';
     html += '<td class="price-cell" style="text-align:right;font-weight:800;">₱'+formatPeso(it.srp)+'</td>';
     html += '<td style="text-align:right;"><button class="swap-btn" data-row="'+rowIdx+'" '+(p.pool.length<=1?'disabled':'')+'>⟲ Swap</button></td>';
     html += '</tr>';
@@ -1682,21 +1707,38 @@ const ALL_SERVICE_REPOPULATE_FNS = [];
 function wireServiceGroups(prefix){
   const state = {};
   const selects = {};
+  const toggles = {};
 
   function populate(){
     SERVICE_GROUPS.forEach(g=>{
       const select = selects[g.key];
+      const toggle = toggles[g.key];
       const items = serviceItemsFor(g.re);
       const prevSku = state[g.key].sku;
+
+      if(!items.length){
+        // Nothing available for this fee type right now (e.g. the active-SKU
+        // list currently published doesn't include SERVICES rows for it) —
+        // disable the checkbox instead of leaving it checkable with an empty dropdown.
+        select.innerHTML = '';
+        select.style.display = 'none';
+        toggle.checked = false;
+        toggle.disabled = true;
+        toggle.closest('.btn-toggle').title = 'No options currently available for this service';
+        state[g.key].checked = false;
+        state[g.key].sku = null;
+        return;
+      }
+
+      toggle.disabled = false;
+      toggle.closest('.btn-toggle').title = '';
       select.innerHTML = items.map(it=>'<option value="'+it.sku+'">'+escapeHtml(it.desc)+' — ₱'+formatPeso(it.srp)+'</option>').join('');
       const stillValid = items.some(it=>it.sku===prevSku);
       if(stillValid){
         select.value = prevSku;
-      } else if(items.length){
+      } else {
         state[g.key].sku = items[0].sku;
         select.value = items[0].sku;
-      } else {
-        state[g.key].sku = null;
       }
     });
   }
@@ -1706,6 +1748,7 @@ function wireServiceGroups(prefix){
     const toggle = document.getElementById(prefix+'Svc'+g.key+'Toggle');
     const select = document.getElementById(prefix+'Svc'+g.key+'Select');
     selects[g.key] = select;
+    toggles[g.key] = toggle;
     toggle.addEventListener('change', (e)=>{
       state[g.key].checked = e.target.checked;
       select.style.display = e.target.checked ? '' : 'none';
@@ -1732,6 +1775,7 @@ function buildServicePicks(serviceState){
   return picks;
 }
 
+const wizServiceState = wireServiceGroups('wiz');
 const prodServiceState = wireServiceGroups('prod');
 
 function buildBundlePicks(b, storeIdx){
@@ -2213,9 +2257,6 @@ async function refreshFromSheet(){
     setSyncStatus('Live refresh isn\'t set up yet — this copy is showing the data it was built with ('+EMBEDDED_ITEM_COUNT+' SKUs).', 'err');
     return;
   }
-  const btn = document.getElementById('refreshBtn');
-  btn.disabled = true;
-  btn.classList.add('spinning');
   setSyncStatus('Fetching latest data from Google Sheets…');
   try{
     const res = await fetch(SHEET_CSV_URL + (SHEET_CSV_URL.includes('?')?'&':'?') + '_ts=' + Date.now(), {cache:'no-store'});
@@ -2241,7 +2282,7 @@ async function refreshFromSheet(){
     ALL_SERVICE_REPOPULATE_FNS.forEach(fn=>fn());
     document.getElementById('lastCount').textContent = ITEMS.length + ' SKUs · ' + STORES.length + ' stores';
     const now = new Date();
-    let statusMsg = 'Updated from Google Sheets at '+now.toLocaleTimeString()+' · '+ITEMS.length+' SKUs loaded.';
+    let statusMsg = 'Auto-updated from Google Sheets at '+now.toLocaleTimeString()+' · '+ITEMS.length+' SKUs loaded.';
     if(changedALot){
       statusMsg += ' (was '+previousCount+' before this refresh — that\'s a big change, worth a quick sanity check if unexpected.)';
     }
@@ -2251,20 +2292,18 @@ async function refreshFromSheet(){
       setSyncStatus(statusMsg, changedALot ? '' : 'ok');
     }
   } catch(err){
-    setSyncStatus('Refresh failed: '+err.message+'. Showing last loaded data.', 'err');
-  } finally {
-    btn.disabled = false;
-    btn.classList.remove('spinning');
+    setSyncStatus('Auto-refresh failed: '+err.message+'. Showing last loaded data — will retry in 15 minutes.', 'err');
   }
 }
 
-document.getElementById('refreshBtn').addEventListener('click', refreshFromSheet);
+const AUTO_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
-// Try an automatic refresh on page load (silently keeps the built-in data if it fails).
+// Refresh immediately on load, then keep polling every 15 minutes.
 if(SHEET_CSV_URL && SHEET_CSV_URL.indexOf('__SHEET_CSV_URL__')<0){
   refreshFromSheet();
+  setInterval(refreshFromSheet, AUTO_REFRESH_INTERVAL_MS);
 } else {
-  setSyncStatus('Live refresh isn\'t set up yet — showing the data this file was built with ('+EMBEDDED_ITEM_COUNT+' SKUs). Click Refresh for setup info.', '');
+  setSyncStatus('Live refresh isn\'t set up yet — showing the data this file was built with ('+EMBEDDED_ITEM_COUNT+' SKUs).', '');
 }
 </script>
 </body>
