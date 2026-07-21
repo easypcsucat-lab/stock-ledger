@@ -2228,14 +2228,11 @@ async function refreshFromSheet(){
     const items = result.items;
     if(!items.length) throw new Error('No items found — check the sheet is published and has data.');
 
-    // Safety net: if the freshly-fetched sheet has drastically fewer items than
-    // what this file was built with, something is very likely wrong with the
-    // published sheet (wrong tab, filtered view, etc.) — refuse to silently
-    // replace good data with an incomplete feed.
-    const MIN_ACCEPTABLE_RATIO = 0.5;
-    if(items.length < EMBEDDED_ITEM_COUNT * MIN_ACCEPTABLE_RATIO){
-      throw new Error('The published sheet only returned '+items.length+' items, but this file was built with '+EMBEDDED_ITEM_COUNT+' — that looks incomplete (wrong tab published, or a filtered view?), so the refresh was skipped to avoid losing data.');
-    }
+    // The sheet is the source of truth — if you clear it and paste a fresh
+    // active-SKU list, the count is *supposed* to change. We don't block that.
+    // We just note it if the count swings a lot, in case it was unintentional.
+    const previousCount = ITEMS.length;
+    const changedALot = previousCount>0 && Math.abs(items.length - previousCount) / previousCount > 0.3;
 
     ITEMS = items;
     CATEGORIES = Array.from(new Set(items.map(i=>i.cat))).sort();
@@ -2244,10 +2241,14 @@ async function refreshFromSheet(){
     ALL_SERVICE_REPOPULATE_FNS.forEach(fn=>fn());
     document.getElementById('lastCount').textContent = ITEMS.length + ' SKUs · ' + STORES.length + ' stores';
     const now = new Date();
+    let statusMsg = 'Updated from Google Sheets at '+now.toLocaleTimeString()+' · '+ITEMS.length+' SKUs loaded.';
+    if(changedALot){
+      statusMsg += ' (was '+previousCount+' before this refresh — that\'s a big change, worth a quick sanity check if unexpected.)';
+    }
     if(result.missingWarning){
-      setSyncStatus('Updated at '+now.toLocaleTimeString()+' · '+ITEMS.length+' SKUs loaded. ⚠ '+result.missingWarning, 'err');
+      setSyncStatus(statusMsg+' ⚠ '+result.missingWarning, 'err');
     } else {
-      setSyncStatus('Updated from Google Sheets at '+now.toLocaleTimeString()+' · '+ITEMS.length+' SKUs loaded.', 'ok');
+      setSyncStatus(statusMsg, changedALot ? '' : 'ok');
     }
   } catch(err){
     setSyncStatus('Refresh failed: '+err.message+'. Showing last loaded data.', 'err');
