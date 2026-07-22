@@ -1213,6 +1213,7 @@ function wireChipGroup(groupId, stateKey, onPick){
       wizState[stateKey] = btn.dataset.val;
       if(onPick) onPick(btn.dataset.val);
       document.getElementById('budgetCustom').value = '';
+      desktopGenerateCount = 0;
     });
   });
 }
@@ -1231,6 +1232,7 @@ document.getElementById('budgetCustom').addEventListener('input', (e)=>{
   if(v>0){
     document.querySelectorAll('#budgetPresetGroup .chip-btn').forEach(b=>b.classList.remove('active'));
     wizState.budget = v;
+    desktopGenerateCount = 0;
   }
 });
 wizStoreSel.addEventListener('change', (e)=>{ wizState.storeIdx = e.target.value===''?-1:parseInt(e.target.value); });
@@ -1327,17 +1329,26 @@ function poolFor(cats, storeIdx, descFilter){
   }).sort((a,b)=>a.srp-b.srp);
 }
 
-function pickBestUnderBudget(pool, budget){
+function pickBestUnderBudget(pool, budget, variant){
   if(!pool.length) return null;
-  let best = null;
-  for(const it of pool){ if(it.srp<=budget) best = it; else break; }
-  return best || pool[0]; // fall back to cheapest available if nothing fits
+  variant = variant || 0;
+  const underBudget = pool.filter(it=>it.srp<=budget);
+  if(underBudget.length){
+    const windowSize = Math.min(3, underBudget.length);
+    const nearest = underBudget.slice(-windowSize); // the closest-to-budget items, from below
+    return nearest[variant % windowSize];
+  }
+  // nothing fits under budget — fall back to a small window of the cheapest available
+  const windowSize = Math.min(3, pool.length);
+  return pool[variant % windowSize];
 }
+
+let desktopGenerateCount = 0;
 
 function generateBuild(){
   const btn = document.getElementById('generateBtn');
   btn.disabled = true; btn.textContent = 'Building…';
-
+  const variant = desktopGenerateCount++;
   const wantGpu = wizState.useCase==='gaming' || wizState.useCase==='content' || wizState.includeGpu;
   const wantMon = wizState.includeMonitor;
   const weights = WEIGHTS[wizState.useCase];
@@ -1356,7 +1367,7 @@ function generateBuild(){
 
   // 1. CPU — the anchor that decides the socket
   const cpuPool = poolFor(SLOTS.find(s=>s.key==='cpu').cats, wizState.storeIdx);
-  const cpu = pickBestUnderBudget(cpuPool, budgetFor('cpu'));
+  const cpu = pickBestUnderBudget(cpuPool, budgetFor('cpu'), variant);
   const cpuSocket = cpu ? extractSocket(cpu.desc) : null;
   picks.push({slot: SLOTS.find(s=>s.key==='cpu'), pool: cpuPool, chosen: cpu, idx: cpu?cpuPool.indexOf(cpu):-1, isAnchor:true});
 
@@ -1364,7 +1375,7 @@ function generateBuild(){
   let gpuDraw = 0, gpu = null;
   if(wantGpu){
     const gpuPool = poolFor(SLOTS.find(s=>s.key==='gpu').cats, wizState.storeIdx);
-    gpu = pickBestUnderBudget(gpuPool, budgetFor('gpu'));
+    gpu = pickBestUnderBudget(gpuPool, budgetFor('gpu'), variant);
     if(gpu) gpuDraw = estimateGpuDraw(gpu.desc);
     picks.push({slot: SLOTS.find(s=>s.key==='gpu'), pool: gpuPool, chosen: gpu, idx: gpu?gpuPool.indexOf(gpu):-1, isAnchor:true});
   }
@@ -1373,7 +1384,7 @@ function generateBuild(){
   const moboAll = poolFor(SLOTS.find(s=>s.key==='mobo').cats, wizState.storeIdx);
   let moboPool = cpuSocket ? moboAll.filter(m=>extractSocket(m.desc)===cpuSocket) : moboAll;
   if(cpuSocket && moboPool.length===0){ moboPool = moboAll; notes.push('Couldn\'t confirm a socket-matched motherboard in stock — showing closest option, please double check the socket before selling.'); }
-  const mobo = pickBestUnderBudget(moboPool, budgetFor('mobo'));
+  const mobo = pickBestUnderBudget(moboPool, budgetFor('mobo'), variant);
   const moboRam = mobo ? extractRamType(mobo.desc) : null;
   picks.push({slot: SLOTS.find(s=>s.key==='mobo'), pool: moboPool, chosen: mobo, idx: mobo?moboPool.indexOf(mobo):-1});
 
@@ -1381,7 +1392,7 @@ function generateBuild(){
   const ramAll = poolFor(SLOTS.find(s=>s.key==='ram').cats, wizState.storeIdx);
   let ramPool = moboRam ? ramAll.filter(r=>extractRamType(r.desc)===moboRam) : ramAll;
   if(moboRam && ramPool.length===0){ ramPool = ramAll; notes.push('Couldn\'t confirm '+moboRam+' RAM in stock — showing closest option, please double check before selling.'); }
-  const ram = pickBestUnderBudget(ramPool, budgetFor('ram'));
+  const ram = pickBestUnderBudget(ramPool, budgetFor('ram'), variant);
   picks.push({slot: SLOTS.find(s=>s.key==='ram'), pool: ramPool, chosen: ram, idx: ram?ramPool.indexOf(ram):-1});
 
   // 5. PSU — must cover CPU + GPU draw with headroom
@@ -1394,14 +1405,14 @@ function generateBuild(){
   } else {
     psuPool.sort((a,b)=>a.srp-b.srp);
   }
-  const psu = pickBestUnderBudget(psuPool, budgetFor('psu'));
+  const psu = pickBestUnderBudget(psuPool, budgetFor('psu'), variant);
   picks.push({slot: SLOTS.find(s=>s.key==='psu'), pool: psuPool, chosen: psu, idx: psu?psuPool.indexOf(psu):-1, meta:'Needs '+requiredWatts+'W+'});
 
   // 6. Storage, Case, Cooling — no strict electrical/socket constraint in this data
   ['stor','case','cool'].forEach(key=>{
     const slot = SLOTS.find(s=>s.key===key);
     const pool = poolFor(slot.cats, wizState.storeIdx, slot.descFilter);
-    const item = pickBestUnderBudget(pool, budgetFor(key));
+    const item = pickBestUnderBudget(pool, budgetFor(key), variant);
     picks.push({slot, pool, chosen: item, idx: item?pool.indexOf(item):-1});
   });
 
@@ -1410,7 +1421,7 @@ function generateBuild(){
     if(!activeSlotsKeys.includes(key)) return;
     const slot = SLOTS.find(s=>s.key===key);
     const pool = poolFor(slot.cats, wizState.storeIdx, slot.descFilter);
-    const item = pickBestUnderBudget(pool, budgetFor(key));
+    const item = pickBestUnderBudget(pool, budgetFor(key), variant);
     picks.push({slot, pool, chosen: item, idx: item?pool.indexOf(item):-1});
   });
 
